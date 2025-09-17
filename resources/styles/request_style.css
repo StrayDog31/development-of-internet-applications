@@ -188,6 +188,14 @@ h3 {
     color: var(--color-dark);
 }
 
+.element__info > *:not(:last-child)::after {
+    content: "|";
+    position: absolute;
+    right: -1rem;
+    color: var(--color-dark);
+    pointer-events: none;
+}
+
 .deletebutton {
     background-color: var(--color-red);
     border-radius: 5px;
@@ -197,4 +205,30 @@ h3 {
 .deleteform {
     justify-self: center;
 
+}
+
+.input-wrapper {
+    flex: 1;
+    text-align: center;
+    position: relative;
+    
+}
+
+input[type="number"] {
+    width: 95%; 
+    height: 30px;
+    background-color: var(--color-dark);
+    color: var(--color-light);
+    border: 1px solid var(--color-gray);
+    border-radius: var(--border-radius);
+    padding: 4px 8px;
+    font-size: 14px;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
