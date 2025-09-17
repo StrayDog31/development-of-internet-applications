@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.class.Name}} Класс</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/styles/normalized.css">
+    <link rel="stylesheet" href="/styles/request_style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="header__inner">
+            <a class="header__logo logo" href="/">
+                <div class="logo__wrapper">
+                    <img 
+                    class="logo__image"
+                    src="/images/logo.png"
+                    alt="Logo"
+                    width="100"
+                    height="100"
+                    loading="lazy"
+                    />
+                </div>
+            </a>
+        </div>
+    </header>
+    <main>
+        <h1 class="request__title">Заявка № {{ .request.ID }}</h1>
+        <div class="title__info">
+            <h3>Класс</h3>
+            <h3>Светимость</h3>
+            <h3>Похожие</h3>
+            <h3>Температура</h3>
+            <h3>Цвет</h3>
+            <h3>Масса</h3>
+        </div>
+        {{range .request.CalcRequestToClass}}
+            <div class="stars__container">
+                <div class="container__element">
+                    <div class="element__info">
+                        <h3>{{ .Class.Name }}</h3>
+                        <h3>{{ .Lyminosity }}</h3>
+                        <h3>{{ .Class.Examples }}</h3>
+                        <h3>{{ .Class.Temperature }}</h3>
+                        <h3>{{ .Class.Color }}</h3>
+                        <h3>{{ .Mass }}</h3>
+                    </div>
+                </div>
+            </div>
+        {{end}}
+        {{if eq .request.Status 1}}
+            <form action="/request/{{.request.ID}}/delete" method="POST" class="deleteform">
+                <button type="submit" class="deletebutton button">Удалить заявку</button>
+            </form>
+        {{end}}
+    </main>
+</body>
+</html> 
