@@ -48,27 +48,21 @@ func StartServer() {
 
 	router := gin.Default()
 
-	// Swagger документация
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// Middleware для аутентификации
 	authMiddleware := baseHandler.WithAuthCheck(role.User, role.Moderator)
 
 	api := router.Group("/api")
 	{
-		// Публичные методы (чтение данных) - доступны без авторизации
 		api.GET("/classes", classHandler.GetClasses)
 		api.GET("/classes/:id", classHandler.GetClassByIDAPI)
 		
-		// Аутентификация
 		api.POST("/auth/register", userHandler.Register)
 		api.POST("/auth/login", userHandler.Login)
 
-		// Защищенные методы - требуют авторизации
 		protected := api.Group("")
 		protected.Use(authMiddleware)
 		{
-			// Методы пользователя
 			protected.GET("/mass-requests/star-calculation", massRequestHandler.GetStarCalc)        
 			protected.GET("/mass-requests", massRequestHandler.GetRequests)           
 			protected.POST("/mass-requests", massRequestHandler.CreateRequest)         
@@ -83,11 +77,11 @@ func StartServer() {
 			protected.GET("/user/profile", userHandler.GetProfile)
 			protected.PUT("/user/profile", userHandler.UpdateProfile)
 
-			// Методы модератора (будут проверять роль внутри handler)
 			protected.PUT("/mass-requests/:id/complete", massRequestHandler.CompleteRequest)
 			protected.POST("/classes", classHandler.CreateClass)
 			protected.PUT("/classes/:id", classHandler.UpdateClass)  
 			protected.DELETE("/classes/:id", classHandler.DeleteClass)
+			protected.PUT("/classes/:id/image", classHandler.UpdateClassImage)
 		}
 	}
 
