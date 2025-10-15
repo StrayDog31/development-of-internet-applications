@@ -3,6 +3,7 @@ package handler
 import (
 	"development-of-internet-applications/internal/app/ds"
 	"development-of-internet-applications/internal/app/repository"
+	"development-of-internet-applications/internal/app/role"
 	"math"
 	"net/http"
 	"strconv"
@@ -23,53 +24,22 @@ func NewMassRequestHandler(repository *repository.Repository) *MassRequestHandle
 	}
 }
 
-func (h *MassRequestHandler) GetMassRequestByID(ctx *gin.Context) {
-	id := ctx.Param("id")
-	reqID, err := strconv.Atoi(id)
-	if err != nil {
-		logrus.Error(err)
-		ctx.Status(http.StatusNotFound)
-		return
-	}
-
-	request, err := h.repo.MassRequest.GetMassRequestByID(uint64(reqID), 1)
-	if err != nil {
-		logrus.Error(err)
-		ctx.Status(http.StatusNotFound)
-		return
-	}
-
-	if request == nil || request.ID == 0 {
-		ctx.Redirect(http.StatusFound, "/")
-		return
-	}
-
-	ctx.HTML(http.StatusOK, "request.html", gin.H{
-		"request": request,
-	})
-}
-
-func (h *MassRequestHandler) DeleteRequestHandler(ctx *gin.Context) {
-	requestIDStr := ctx.Param("id")
-	requestID, err := strconv.ParseUint(requestIDStr, 10, 64)
-	if err != nil {
-		logrus.Error("Invalid request ID:", err)
-		ctx.Status(http.StatusBadRequest)
-		return
-	}
-
-	err = h.repo.MassRequest.DeleteRequest(requestID)
-	if err != nil {
-		logrus.Error("Error deleting request:", err)
-		ctx.Status(http.StatusInternalServerError)
-		return
-	}
-
-	ctx.Redirect(http.StatusFound, "/")
-}
-
+// GetStarCalc godoc
+// @Summary Get star calculation cart info
+// @Description Get draft request ID and item count for current user
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /mass-requests/star-calculation [get]
 func (h *MassRequestHandler) GetStarCalc(ctx *gin.Context) {
-	userID := GetFixedUserID()
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
 
 	request, err := h.repo.MassRequest.GetUserDraftRequest(userID)
 	if err != nil {
@@ -95,6 +65,20 @@ func (h *MassRequestHandler) GetStarCalc(ctx *gin.Context) {
 	})
 }
 
+// GetRequests godoc
+// @Summary Get mass requests
+// @Description Get mass requests with optional filters
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param status query int false "Filter by status"
+// @Param start_date query string false "Filter from date (YYYY-MM-DD)"
+// @Param end_date query string false "Filter to date (YYYY-MM-DD)"
+// @Success 200 {array} ds.MassRequest
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /mass-requests [get]
 func (h *MassRequestHandler) GetRequests(ctx *gin.Context) {
 	filter := &repository.MassRequestFilter{}
 
@@ -116,16 +100,48 @@ func (h *MassRequestHandler) GetRequests(ctx *gin.Context) {
 		}
 	}
 
-	requests, err := h.repo.MassRequest.GetRequests(filter)
-	if err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, requests)
+	userRole, exists := GetUserRoleFromContext(ctx)
+	if exists && userRole == role.Moderator {
+		// Модератор видит все заявки
+		requests, err := h.repo.MassRequest.GetRequests(filter)
+		if err != nil {
+			logrus.Error(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			return
+		}
+		ctx.JSON(http.StatusOK, requests)
+	} else {
+		// Обычный пользователь видит только свои заявки
+		requests, err := h.repo.MassRequest.GetMassRequests(userID, filter)
+		if err != nil {
+			logrus.Error(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			return
+		}
+		ctx.JSON(http.StatusOK, requests)
+	}
 }
 
+// GetRequestByID godoc
+// @Summary Get mass request by ID
+// @Description Get detailed information about a specific mass request
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Mass Request ID"
+// @Success 200 {object} ds.MassRequest
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /mass-requests/{id} [get]
 func (h *MassRequestHandler) GetRequestByID(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -134,7 +150,23 @@ func (h *MassRequestHandler) GetRequestByID(ctx *gin.Context) {
 		return
 	}
 
-	request, err := h.repo.MassRequest.GetRequestByID(requestID)
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userRole, exists := GetUserRoleFromContext(ctx)
+	
+	var request *ds.MassRequest
+	if exists && userRole == role.Moderator {
+		// Модератор может видеть любую заявку
+		request, err = h.repo.MassRequest.GetRequestByID(requestID)
+	} else {
+		// Обычный пользователь - только свою заявку
+		request, err = h.repo.MassRequest.GetMassRequestByID(requestID, userID)
+	}
+
 	if err != nil {
 		logrus.Error(err)
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
@@ -144,8 +176,23 @@ func (h *MassRequestHandler) GetRequestByID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, request)
 }
 
+// CreateRequest godoc
+// @Summary Create mass request
+// @Description Create a new draft mass request
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 201 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /mass-requests [post]
 func (h *MassRequestHandler) CreateRequest(ctx *gin.Context) {
-	userID := GetFixedUserID()
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
 
 	request := &ds.MassRequest{
 		Status:    1,
@@ -165,6 +212,21 @@ func (h *MassRequestHandler) CreateRequest(ctx *gin.Context) {
 	})
 }
 
+// UpdateRequest godoc
+// @Summary Update mass request
+// @Description Update fields of a draft mass request
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Mass Request ID"
+// @Param updates body map[string]interface{} true "Update data"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /mass-requests/{id} [put]
 func (h *MassRequestHandler) UpdateRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -179,7 +241,14 @@ func (h *MassRequestHandler) UpdateRequest(ctx *gin.Context) {
 		return
 	}
 
-	request, err := h.repo.MassRequest.GetRequestByID(requestID)
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Проверяем что пользователь обновляет свою заявку
+	request, err := h.repo.MassRequest.GetMassRequestByID(requestID, userID)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
 		return
@@ -199,6 +268,19 @@ func (h *MassRequestHandler) UpdateRequest(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Request updated successfully"})
 }
 
+// FormRequest godoc
+// @Summary Form mass request
+// @Description Submit draft request for moderation
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Mass Request ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /mass-requests/{id}/form [put]
 func (h *MassRequestHandler) FormRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -207,7 +289,13 @@ func (h *MassRequestHandler) FormRequest(ctx *gin.Context) {
 		return
 	}
 
-	request, err := h.repo.MassRequest.GetRequestByID(requestID)
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	request, err := h.repo.MassRequest.GetMassRequestByID(requestID, userID)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
 		return
@@ -239,6 +327,20 @@ func (h *MassRequestHandler) FormRequest(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Request formed successfully"})
 }
 
+// CompleteRequest godoc
+// @Summary Complete mass request
+// @Description Complete or reject a mass request with calculations (moderator only)
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Mass Request ID"
+// @Param request body map[string]string true "Action data"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /mass-requests/{id}/complete [put]
 func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -255,6 +357,13 @@ func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 		return
 	}
 
+	// Проверяем что пользователь - модератор
+	userRole, exists := GetUserRoleFromContext(ctx)
+	if !exists || userRole != role.Moderator {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Moderator access required"})
+		return
+	}
+
 	request, err := h.repo.MassRequest.GetRequestByID(requestID)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
@@ -266,7 +375,7 @@ func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 		return
 	}
 
-	moderatorID := uint64(2)
+	moderatorID, _ := GetUserIDFromContext(ctx)
 	now := time.Now()
 
 	var newStatus uint8
@@ -303,6 +412,19 @@ func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 	})
 }
 
+// DeleteRequest godoc
+// @Summary Delete mass request
+// @Description Delete a draft mass request
+// @Tags mass-requests
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Mass Request ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /mass-requests/{id} [delete]
 func (h *MassRequestHandler) DeleteRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -311,7 +433,13 @@ func (h *MassRequestHandler) DeleteRequest(ctx *gin.Context) {
 		return
 	}
 
-	request, err := h.repo.MassRequest.GetRequestByID(requestID)
+	userID, exists := GetUserIDFromContext(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	request, err := h.repo.MassRequest.GetMassRequestByID(requestID, userID)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
 		return
@@ -331,6 +459,7 @@ func (h *MassRequestHandler) DeleteRequest(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Request deleted successfully"})
 }
 
+// Остальные методы без изменений
 func (h *MassRequestHandler) calculateStarMass(spectralClass string, luminosity uint64) float64 {
 	if len(spectralClass) == 0 {
 		return 0

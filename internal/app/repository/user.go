@@ -100,3 +100,4 @@ func (r *UserRepository) UserExists(id uint64) bool {
 	r.db.Model(&ds.User{}).Where("id = ?", id).Count(&count)
 	return count > 0
 }
+

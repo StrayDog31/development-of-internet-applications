@@ -190,3 +190,23 @@ func (r *MassRequestRepository) GetActiveMassRequestByUser(userID uint64) (*ds.M
 func uint64Ptr(n uint64) *uint64 {
 	return &n
 }
+
+func (r *MassRequestRepository) GetMassRequests(userID uint64, filter *MassRequestFilter) ([]ds.MassRequest, error) {
+    var requests []ds.MassRequest
+    
+    query := r.db.Preload("MassRequestToClass").Preload("MassRequestToClass.Class").
+        Where("user_id = ? AND status != ?", userID, 2)
+    
+    if filter.Status > 0 {
+        query = query.Where("status = ?", filter.Status)
+    }
+    if !filter.StartDate.IsZero() {
+        query = query.Where("formed_at >= ?", filter.StartDate)
+    }
+    if !filter.EndDate.IsZero() {
+        query = query.Where("formed_at <= ?", filter.EndDate)
+    }
+    
+    err := query.Order("created_at DESC").Find(&requests).Error
+    return requests, err
+}

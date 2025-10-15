@@ -79,6 +79,15 @@ services:
     depends_on:
       - postgres
 
+  
+  redis:
+    image: redis:7-alpine
+    container_name: redis-stellar
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
   nginx: # наш еще один сервис в подсети docker будет nginx 
     image: nginx:1.19.2-alpine # исходники сервиса взять отсюда
     hostname: nginx # hostname внутри подсети docker будет nginx
@@ -110,3 +119,4 @@ volumes:
   data4-1:
   data4-2:
   postgres_data:
+  redis_data:
