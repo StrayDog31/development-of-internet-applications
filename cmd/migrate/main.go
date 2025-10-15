@@ -1,8 +1,8 @@
 package main
 
 import (
-	"development-of-internet-application/internal/app/ds"
-	"development-of-internet-application/internal/app/dsn"
+	"development-of-internet-applications/internal/app/ds"
+	"development-of-internet-applications/internal/app/dsn"
 	"fmt"
 	"log"
 	"os"
@@ -33,20 +33,20 @@ func main() {
 
 	err = db.AutoMigrate(
 		&ds.Class{},
-		&ds.CalcRequest{},
-		&ds.CalcRequestToClass{},
+		&ds.MassRequest{},
+		&ds.MassRequestToClass{},
 		&ds.User{},
 	)
 	if err != nil {
 		panic("cant migrate db")
 	}
 
-		err = db.Migrator().DropTable(&ds.CalcRequest{}) // Удалить старую таблицу
+		err = db.Migrator().DropTable(&ds.MassRequest{})
 	if err != nil {
 		log.Fatal("Error dropping table:", err)
 	}
 
-	err = db.AutoMigrate(&ds.CalcRequest{}) // Создать новую таблицу
+	err = db.AutoMigrate(&ds.MassRequest{})
 	if err != nil {
 		log.Fatal("Error creating table:", err)
 	}

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"development-of-internet-application/internal/api"
+	"development-of-internet-applications/internal/api"
 	
 	"github.com/sirupsen/logrus"
 )

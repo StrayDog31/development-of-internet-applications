@@ -9,5 +9,5 @@ type Class struct {
 	Examples    string			`gorm:"type:text;not null"`
 	IsDeleted       bool     `gorm:"boolean;not null"`
 	Image           string      `gorm:"type:varchar(100)"`
-	CalcRequestToClass  []CalcRequestToClass `gorm:"foreignKey:ClassID"`
+	MassRequestToClass  []MassRequestToClass `gorm:"foreignKey:ClassID"`
 }

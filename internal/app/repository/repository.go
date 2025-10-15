@@ -1,8 +1,6 @@
 package repository
 
 import (
-
-	//"development-of-internet-application/internal/app/dsn"
 	"gorm.io/driver/postgres"
 
 	"gorm.io/gorm"
@@ -10,7 +8,8 @@ import (
 
 type Repository struct {
 	Class *ClassRepository
-	CalcRequest *CalcRequestRepository
+	MassRequest *MassRequestRepository
+	User *UserRepository
 
 }
 
@@ -25,6 +24,7 @@ func NewRepository() (*Repository, error) {
 
 	return &Repository{
 		Class: NewClassRepository(db),
-		CalcRequest: NewCalcRequestRepository(db),
+		MassRequest: NewMassRequestRepository(db),
+		User: NewUserRepository(db),
 	}, nil
 }
