@@ -1,16 +1,17 @@
 package ds
 
-import "time"
+import (
+	"time"
+)
 
 type MassRequest struct {
-	ID                uint64              `gorm:"primaryKey"`
-	Status            uint8               `gorm:"not null;default:1"`  // 1 - draft, 2 - deleted, 3 - pending, 4 - resolved, 5 - rejected
-	UserID            uint64              `gorm:"not null"`
-	User              User                `gorm:"foreignKey:UserID;references:ID"`
-	ModeratorId       uint64              `gorm:"default:null"`
-	Moderator         User                `gorm:"foreignKey:ModeratorId;references:ID"`
-	MassRequestToClass []MassRequestToClass `gorm:"foreignKey:RequestID"`
-	CreatedAt         time.Time           `gorm:"not null;default:now()"`
-	FormedAt          time.Time           `gorm:"default:null"`
-	ClosedAt          time.Time           `gorm:"default:null"`
+	ID                 uint64               `gorm:"primaryKey" json:"id"`
+	Status             uint8                `json:"status"`
+	UserID             uint64               `json:"user_id"`
+	ModeratorId        *uint64              `json:"moderator_id,omitempty"`
+	CreatedAt          time.Time            `json:"created_at"`
+	FormedAt           *time.Time           `json:"formed_at,omitempty"`
+	ClosedAt           *time.Time           `json:"closed_at,omitempty"`
+	Classes            []Class              `gorm:"many2many:mass_request_to_class;" json:"classes,omitempty"`
+	MassRequestToClass []MassRequestToClass `gorm:"foreignKey:RequestID" json:"mass_request_to_class,omitempty"`
 }

@@ -42,7 +42,7 @@ func LoadConfig() *Config {
 			SigningMethod: jwt.SigningMethodHS256,
 		},
 		Redis: RedisConfig{
-			Host:        getEnv("REDIS_HOST", "localhost"),
+			Host:        getEnv("REDIS_HOST", "172.19.80.1"),
 			Port:        getEnv("REDIS_PORT", "6379"),
 			User:        getEnv("REDIS_USER", ""),
 			Password:    getEnv("REDIS_PASSWORD", ""),

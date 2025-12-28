@@ -17,7 +17,7 @@ type Repository struct {
 }
 
 func NewRepository() (*Repository, error) {
-	dsnString := "host=localhost port=5432 user=postgres password=postgres dbname=dia_db sslmode=disable"
+	dsnString := "host=172.19.80.1 port=5432 user=postgres password=postgres dbname=dia_db sslmode=disable"
 
 	db, err := gorm.Open(postgres.Open(dsnString), &gorm.Config{})
 	if err != nil {
@@ -26,7 +26,6 @@ func NewRepository() (*Repository, error) {
 	
 	cfg := config.LoadConfig()
 
-	// ⚠️ РАСКОММЕНТИРУЙТЕ Redis подключение:
 	redis, err := redisClient.New(cfg.Redis)
 	if err != nil {
 		logrus.Warnf("Failed to connect to Redis: %v", err)

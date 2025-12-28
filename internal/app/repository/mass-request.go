@@ -25,7 +25,11 @@ type MassRequestFilter struct {
 
 func (r *MassRequestRepository) GetUserDraftRequest(userID uint64) (*ds.MassRequest, error) {
 	var request ds.MassRequest
-	err := r.db.Where("user_id = ? AND status = ?", userID, 1).First(&request).Error
+	err := r.db.
+		Preload("MassRequestToClass").
+		Preload("MassRequestToClass.Class").
+		Where("user_id = ? AND status = ?", userID, 1).
+		First(&request).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -39,7 +43,9 @@ func (r *MassRequestRepository) CreateRequest(request *ds.MassRequest) error {
 func (r *MassRequestRepository) GetRequests(filter *MassRequestFilter) ([]ds.MassRequest, error) {
 	var requests []ds.MassRequest
 	
-	query := r.db.Preload("User").Preload("Moderator").
+	query := r.db.
+		Preload("MassRequestToClass").
+		Preload("MassRequestToClass.Class").
 		Where("status != ? AND status != ?", 1, 2)
 	
 	if filter.Status > 0 {
@@ -58,7 +64,8 @@ func (r *MassRequestRepository) GetRequests(filter *MassRequestFilter) ([]ds.Mas
 
 func (r *MassRequestRepository) GetRequestByID(id uint64) (*ds.MassRequest, error) {
 	var request ds.MassRequest
-	err := r.db.Preload("User").Preload("Moderator").
+	err := r.db.
+		Preload("MassRequestToClass").
 		Preload("MassRequestToClass.Class").
 		Where("id = ? AND status != ?", id, 2).
 		First(&request).Error
@@ -73,23 +80,36 @@ func (r *MassRequestRepository) DeleteRequest(id uint64) error {
 	return r.db.Model(&ds.MassRequest{}).Where("id = ?", id).Update("status", 2).Error
 }
 
-func (r *MassRequestRepository) AddClassToRequest(requestID, classID uint64) error {
-    
-    return r.db.Transaction(func(tx *gorm.DB) error {
-        var existingLink ds.MassRequestToClass
-        err := tx.Where("request_id = ? AND class_id = ?", requestID, classID).First(&existingLink).Error
-        if err == nil {
-            return nil
-        } else if !errors.Is(err, gorm.ErrRecordNotFound) {
-            return err
-        }
+func (r *MassRequestRepository) AddClassToRequest(requestID, classID uint64, luminosity, mass *uint64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var existingLink ds.MassRequestToClass
+		err := tx.Where("request_id = ? AND class_id = ?", requestID, classID).First(&existingLink).Error
+		if err == nil {
+			updates := map[string]interface{}{}
+			if luminosity != nil {
+				updates["luminosity"] = luminosity
+			}
+			if mass != nil {
+				updates["mass"] = mass
+			}
+			if len(updates) > 0 {
+				return tx.Model(&ds.MassRequestToClass{}).
+					Where("request_id = ? AND class_id = ?", requestID, classID).
+					Updates(updates).Error
+			}
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 
-        item := ds.MassRequestToClass{
-            RequestID: requestID,
-            ClassID:   classID,
-        }
-        return tx.Create(&item).Error
-    })
+		item := ds.MassRequestToClass{
+			RequestID:  requestID,
+			ClassID:    classID,
+			Luminosity: luminosity,
+			Mass:       mass,
+		}
+		return tx.Create(&item).Error
+	})
 }
 
 func (r *MassRequestRepository) RemoveClassFromRequest(requestID, classID uint64) error {
@@ -149,7 +169,7 @@ func (r *MassRequestRepository) AddClassToMassRequest(MassRequestID, classID uin
 			updates["luminosity"] = luminosity
 		}
 		if number != nil {
-			updates["number"] = number
+			updates["mass"] = number
 		}
 		if len(updates) > 0 {
 			return r.db.Model(&ds.MassRequestToClass{}).
@@ -165,6 +185,7 @@ func (r *MassRequestRepository) AddClassToMassRequest(MassRequestID, classID uin
 		RequestID:  MassRequestID,
 		ClassID:    classID,
 		Luminosity: luminosity,
+		Mass:       number,
 	}
 	return r.db.Create(&MassRequestToClass).Error
 }
@@ -173,6 +194,7 @@ func (r *MassRequestRepository) GetActiveMassRequestByUser(userID uint64) (*ds.M
 	var MassRequest ds.MassRequest
 	err := r.db.
 		Preload("MassRequestToClass").
+		Preload("MassRequestToClass.Class").
 		Where("user_id = ? AND status = ?", userID, 1).
 		Order("created_at DESC").
 		First(&MassRequest).Error
@@ -187,15 +209,13 @@ func (r *MassRequestRepository) GetActiveMassRequestByUser(userID uint64) (*ds.M
 	return &MassRequest, nil
 }
 
-func uint64Ptr(n uint64) *uint64 {
-	return &n
-}
-
 func (r *MassRequestRepository) GetMassRequests(userID uint64, filter *MassRequestFilter) ([]ds.MassRequest, error) {
     var requests []ds.MassRequest
     
-    query := r.db.Preload("MassRequestToClass").Preload("MassRequestToClass.Class").
-        Where("user_id = ? AND status != ?", userID, 2)
+    query := r.db.
+		Preload("MassRequestToClass").
+		Preload("MassRequestToClass.Class").
+		Where("user_id = ? AND status != ?", userID, 2)
     
     if filter.Status > 0 {
         query = query.Where("status = ?", filter.Status)

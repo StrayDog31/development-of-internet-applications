@@ -93,10 +93,33 @@ func GetUserIDFromContext(gCtx *gin.Context) (uint64, bool) {
 }
 
 func GetUserRoleFromContext(gCtx *gin.Context) (role.Role, bool) {
-	userRole, exists := gCtx.Get("user_role")
-	if !exists {
-		return 0, false
-	}
-	r, ok := userRole.(role.Role)
-	return r, ok
+    if val, exists := gCtx.Get("user_role"); exists {
+        logrus.Debugf("Found 'user_role': %v (type: %T)", val, val)
+        return convertToRole(val)
+    }
+    
+    if val, exists := gCtx.Get("role"); exists {
+        logrus.Debugf("Found 'role': %v (type: %T)", val, val)
+        return convertToRole(val)
+    }
+    
+    return 0, false
+}
+
+func convertToRole(val interface{}) (role.Role, bool) {
+    switch v := val.(type) {
+    case role.Role:
+        return v, true
+    case float64:
+        return role.Role(v), true
+    case int:
+        return role.Role(v), true
+    case string:
+        if v == "moderator" || v == "1" {
+            return role.Moderator, true
+        } else if v == "user" || v == "0" {
+            return role.User, true
+        }
+    }
+    return 0, false
 }

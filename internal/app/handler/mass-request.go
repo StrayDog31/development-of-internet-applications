@@ -1,84 +1,56 @@
 package handler
 
 import (
+	"bytes"
 	"development-of-internet-applications/internal/app/ds"
 	"development-of-internet-applications/internal/app/repository"
 	"development-of-internet-applications/internal/app/role"
-	"math"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
+type NestJSResponse struct {
+	RequestID  uint64        `json:"request_id"`
+	Status     string        `json:"status"`
+	Calculated bool          `json:"calculated"`
+	Results    []ClassResult `json:"results,omitempty"`
+	Error      string        `json:"error,omitempty"`
+}
+
+type ClassResult struct {
+	ClassID uint64  `json:"class_id"`
+	Mass    float64 `json:"mass"`
+	Message string  `json:"message,omitempty"`
+}
+
 type MassRequestHandler struct {
-	repo *repository.Repository
+	repo             *repository.Repository
+	webhookBaseURL   string
+	nestJSServiceURL string
 }
 
 func NewMassRequestHandler(repository *repository.Repository) *MassRequestHandler {
 	return &MassRequestHandler{
-		repo: repository,
+		repo:             repository,
+		webhookBaseURL:   "http://172.19.80.1:8080",
+		nestJSServiceURL: "http://172.19.80.1:8000",
 	}
 }
 
-// GetStarCalc godoc
-// @Summary Get star calculation cart info
-// @Description Get draft request ID and item count for current user
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Router /mass-requests/star-calculation [get]
 func (h *MassRequestHandler) GetStarCalc(ctx *gin.Context) {
-	userID, exists := GetUserIDFromContext(ctx)
-	if !exists {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	request, err := h.repo.MassRequest.GetUserDraftRequest(userID)
-	if err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-		return
-	}
-
-	var requestID uint64
-	var itemsCount int64
-
-	if request != nil {
-		requestID = request.ID
-		itemsCount, err = h.repo.MassRequest.GetRequestItemsCount(requestID)
-		if err != nil {
-			logrus.Error(err)
-		}
-	}
-
 	ctx.JSON(http.StatusOK, gin.H{
-		"request_id":  requestID,
-		"items_count": itemsCount,
+		"request_id":  -1,
+		"items_count": 0,
 	})
 }
 
-// GetRequests godoc
-// @Summary Get mass requests
-// @Description Get mass requests with optional filters
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param status query int false "Filter by status"
-// @Param start_date query string false "Filter from date (YYYY-MM-DD)"
-// @Param end_date query string false "Filter to date (YYYY-MM-DD)"
-// @Success 200 {array} ds.MassRequest
-// @Failure 401 {object} map[string]string
-// @Failure 500 {object} map[string]string
-// @Router /mass-requests [get]
 func (h *MassRequestHandler) GetRequests(ctx *gin.Context) {
 	filter := &repository.MassRequestFilter{}
 
@@ -108,7 +80,6 @@ func (h *MassRequestHandler) GetRequests(ctx *gin.Context) {
 
 	userRole, exists := GetUserRoleFromContext(ctx)
 	if exists && userRole == role.Moderator {
-		// Модератор видит все заявки
 		requests, err := h.repo.MassRequest.GetRequests(filter)
 		if err != nil {
 			logrus.Error(err)
@@ -117,7 +88,6 @@ func (h *MassRequestHandler) GetRequests(ctx *gin.Context) {
 		}
 		ctx.JSON(http.StatusOK, requests)
 	} else {
-		// Обычный пользователь видит только свои заявки
 		requests, err := h.repo.MassRequest.GetMassRequests(userID, filter)
 		if err != nil {
 			logrus.Error(err)
@@ -128,20 +98,6 @@ func (h *MassRequestHandler) GetRequests(ctx *gin.Context) {
 	}
 }
 
-// GetRequestByID godoc
-// @Summary Get mass request by ID
-// @Description Get detailed information about a specific mass request
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Mass Request ID"
-// @Success 200 {object} ds.MassRequest
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 403 {object} map[string]string
-// @Failure 404 {object} map[string]string
-// @Router /mass-requests/{id} [get]
 func (h *MassRequestHandler) GetRequestByID(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -157,13 +113,11 @@ func (h *MassRequestHandler) GetRequestByID(ctx *gin.Context) {
 	}
 
 	userRole, exists := GetUserRoleFromContext(ctx)
-	
+
 	var request *ds.MassRequest
 	if exists && userRole == role.Moderator {
-		// Модератор может видеть любую заявку
 		request, err = h.repo.MassRequest.GetRequestByID(requestID)
 	} else {
-		// Обычный пользователь - только свою заявку
 		request, err = h.repo.MassRequest.GetMassRequestByID(requestID, userID)
 	}
 
@@ -176,17 +130,6 @@ func (h *MassRequestHandler) GetRequestByID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, request)
 }
 
-// CreateRequest godoc
-// @Summary Create mass request
-// @Description Create a new draft mass request
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Success 201 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Failure 500 {object} map[string]string
-// @Router /mass-requests [post]
 func (h *MassRequestHandler) CreateRequest(ctx *gin.Context) {
 	userID, exists := GetUserIDFromContext(ctx)
 	if !exists {
@@ -212,21 +155,6 @@ func (h *MassRequestHandler) CreateRequest(ctx *gin.Context) {
 	})
 }
 
-// UpdateRequest godoc
-// @Summary Update mass request
-// @Description Update fields of a draft mass request
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Mass Request ID"
-// @Param updates body map[string]interface{} true "Update data"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 403 {object} map[string]string
-// @Failure 404 {object} map[string]string
-// @Router /mass-requests/{id} [put]
 func (h *MassRequestHandler) UpdateRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -247,7 +175,6 @@ func (h *MassRequestHandler) UpdateRequest(ctx *gin.Context) {
 		return
 	}
 
-	// Проверяем что пользователь обновляет свою заявку
 	request, err := h.repo.MassRequest.GetMassRequestByID(requestID, userID)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
@@ -268,19 +195,6 @@ func (h *MassRequestHandler) UpdateRequest(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Request updated successfully"})
 }
 
-// FormRequest godoc
-// @Summary Form mass request
-// @Description Submit draft request for moderation
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Mass Request ID"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 403 {object} map[string]string
-// @Router /mass-requests/{id}/form [put]
 func (h *MassRequestHandler) FormRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -327,20 +241,6 @@ func (h *MassRequestHandler) FormRequest(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Request formed successfully"})
 }
 
-// CompleteRequest godoc
-// @Summary Complete mass request
-// @Description Complete or reject a mass request with calculations (moderator only)
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Mass Request ID"
-// @Param request body map[string]string true "Action data"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 403 {object} map[string]string
-// @Router /mass-requests/{id}/complete [put]
 func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -357,10 +257,17 @@ func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 		return
 	}
 
-	// Проверяем что пользователь - модератор
 	userRole, exists := GetUserRoleFromContext(ctx)
-	if !exists || userRole != role.Moderator {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": "Moderator access required"})
+	if !exists {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Role not found"})
+		return
+	}
+
+	if userRole != role.Moderator {
+		ctx.JSON(http.StatusForbidden, gin.H{
+			"error":     "Moderator access required",
+			"your_role": userRole,
+		})
 		return
 	}
 
@@ -371,60 +278,71 @@ func (h *MassRequestHandler) CompleteRequest(ctx *gin.Context) {
 	}
 
 	if request.Status != 3 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Only pending requests can be completed/rejected"})
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":          "Only pending requests can be completed/rejected",
+			"current_status": request.Status,
+		})
 		return
 	}
 
 	moderatorID, _ := GetUserIDFromContext(ctx)
 	now := time.Now()
 
-	var newStatus uint8
-	switch req.Action {
-	case "complete":
-		newStatus = 4
-		if err := h.calculateRequestFields(request); err != nil {
-			logrus.Error(err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to calculate star masses"})
+	if req.Action == "complete" {
+		success := h.sendToNestJS(request)
+
+		if !success {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to send request to calculation service",
+			})
 			return
 		}
-	case "reject":
-		newStatus = 5
-	default:
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action"})
+
+		updates := map[string]interface{}{
+			"status":       6,
+			"moderator_id": moderatorID,
+			"closed_at":    now,
+		}
+
+		if err := h.repo.MassRequest.UpdateRequest(requestID, updates); err != nil {
+			logrus.Errorf("Failed to update request status: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to update request status",
+			})
+			return
+		}
+
+		ctx.JSON(http.StatusAccepted, gin.H{
+			"message":    "Request accepted for processing",
+			"request_id": requestID,
+			"status":     6,
+		})
 		return
 	}
 
-	updates := map[string]interface{}{
-		"status":       newStatus,
-		"moderator_id": moderatorID,
-		"closed_at":    now,
-	}
-
-	if err := h.repo.MassRequest.UpdateRequest(requestID, updates); err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update request"})
+	if req.Action == "reject" {
+		updates := map[string]interface{}{
+			"status":       5,
+			"moderator_id": moderatorID,
+			"closed_at":    now,
+		}
+		if err := h.repo.MassRequest.UpdateRequest(requestID, updates); err != nil {
+			logrus.Errorf("Failed to reject request: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to reject request",
+			})
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{
+			"message": "Request rejected successfully",
+			"status":  5,
+		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
-		"message": "Request " + req.Action + "d successfully",
-		"status":  newStatus,
-	})
+	ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action"})
 }
 
-// DeleteRequest godoc
-// @Summary Delete mass request
-// @Description Delete a draft mass request
-// @Tags mass-requests
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Mass Request ID"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 403 {object} map[string]string
-// @Router /mass-requests/{id} [delete]
 func (h *MassRequestHandler) DeleteRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	requestID, err := strconv.ParseUint(idStr, 10, 64)
@@ -459,66 +377,160 @@ func (h *MassRequestHandler) DeleteRequest(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Request deleted successfully"})
 }
 
-// Остальные методы без изменений
-func (h *MassRequestHandler) calculateStarMass(spectralClass string, luminosity uint64) float64 {
-	if len(spectralClass) == 0 {
-		return 0
+func (h *MassRequestHandler) sendToNestJS(request *ds.MassRequest) bool {
+	type ClassData struct {
+		ClassID    uint64  `json:"class_id"`
+		Luminosity *uint64 `json:"luminosity,omitempty"`
 	}
-	
-	class := strings.ToUpper(string(spectralClass[0]))
-	
-	var exponent float64
-	
-	switch class {
-	case "O", "B", "A":
-		exponent = 0.222
-	case "F", "G":
-		exponent = 0.234
-	case "K", "M":
-		exponent = 0.264
-	default:
-		exponent = 0.25
+
+	type Payload struct {
+		RequestID   uint64      `json:"request_id"`
+		UserID      uint64      `json:"user_id"`
+		CallbackURL string      `json:"callback_url"`
+		Classes     []ClassData `json:"classes"`
 	}
-	
-	luminosityRatio := float64(luminosity)
-	
-	mass := math.Pow(luminosityRatio, exponent)
-	
-	return math.Round(mass*100) / 100
+
+	var classes []ClassData
+	for _, item := range request.MassRequestToClass {
+		classes = append(classes, ClassData{
+			ClassID:    item.ClassID,
+			Luminosity: item.Luminosity,
+		})
+	}
+
+	if len(classes) == 0 {
+		logrus.Errorf("No classes found for request %d", request.ID)
+		return false
+	}
+
+	callbackURL := fmt.Sprintf("%s/api/v1/webhook/calculation-result", h.webhookBaseURL)
+
+	payload := Payload{
+		RequestID:   request.ID,
+		UserID:      request.UserID,
+		CallbackURL: callbackURL,
+		Classes:     classes,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		logrus.Errorf("Failed to marshal payload for request %d: %v", request.ID, err)
+		return false
+	}
+
+	url := fmt.Sprintf("%s/calculator/star-mass", h.nestJSServiceURL)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+
+	if err != nil {
+		logrus.Errorf("Failed to send request %d to NestJS service (%s): %v", request.ID, url, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logrus.Errorf("Failed to read response from NestJS for request %d: %v", request.ID, err)
+		return false
+	}
+
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		logrus.Errorf("NestJS returned error for request %d: HTTP %d - %s", request.ID, resp.StatusCode, string(body))
+		return false
+	}
+
+	var nestResponse struct {
+		Message   string `json:"message"`
+		RequestID uint64 `json:"request_id"`
+		Status    string `json:"status"`
+	}
+
+	if err := json.Unmarshal(body, &nestResponse); err != nil {
+		logrus.Errorf("Failed to parse NestJS response for request %d: %v", request.ID, err)
+	}
+
+	logrus.Infof("Successfully sent request %d to NestJS. Response: %s", request.ID, nestResponse.Message)
+
+	return true
 }
 
-func (h *MassRequestHandler) calculateRequestFields(request *ds.MassRequest) error {
-	logrus.Infof("Calculating star masses for request ID: %d", request.ID)
-	
-	for i := range request.MassRequestToClass {
-		item := &request.MassRequestToClass[i]
-		if item.Luminosity != nil && item.Class.Spectre != "" {
-			mass := h.calculateStarMass(item.Class.Spectre, *item.Luminosity)
-			massUint := uint64(mass * 100)
-			item.Mass = &massUint
-			
-			logrus.Infof("Calculated mass for class %s (%s): %.2f M☉", 
-				item.Class.Name, item.Class.Spectre, mass)
-		} else {
-			logrus.Warnf("Missing luminosity or spectre for class %s in request %d", 
-				item.Class.Name, request.ID)
-		}
-	}
-	
-	for _, item := range request.MassRequestToClass {
-		if item.Mass != nil {
-			updates := map[string]interface{}{
-				"mass": item.Mass,
-			}
-			if err := h.repo.MassRequest.UpdateRequestClassItem(request.ID, item.ClassID, updates); err != nil {
-				logrus.Errorf("Failed to update mass for class %d in request %d: %v", 
-					item.ClassID, request.ID, err)
-				return err
-			}
-		}
-	}
-	
-	logrus.Infof("Successfully calculated masses for %d classes in request %d", 
-		len(request.MassRequestToClass), request.ID)
-	return nil
+func (h *MassRequestHandler) WebhookResult(ctx *gin.Context) {
+    apiKey := ctx.GetHeader("X-Api-Key")
+    if apiKey != "SECRET_KEY_123" {
+        ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+        return
+    }
+
+    var result NestJSResponse
+    if err := ctx.ShouldBindJSON(&result); err != nil {
+        logrus.Errorf("Invalid webhook payload: %v", err)
+        ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+        return
+    }
+
+    logrus.Infof("Received webhook for request %d with status: %s", result.RequestID, result.Status)
+
+    ctx.JSON(http.StatusAccepted, gin.H{
+        "message": "Webhook accepted, processing started",
+        "request_id": result.RequestID,
+    })
+
+    go h.processWebhookAsync(result)
+}
+
+func (h *MassRequestHandler) processWebhookAsync(result NestJSResponse) {
+    _, err := h.repo.MassRequest.GetRequestByID(result.RequestID)
+    if err != nil {
+        logrus.Errorf("Request not found: %d", result.RequestID)
+        return
+    }
+
+    var newStatus uint8
+    var message string
+
+    if result.Calculated && len(result.Results) > 0 {
+        successCount := 0
+        for _, classResult := range result.Results {
+            massUint := uint64(classResult.Mass * 100)
+            updates := map[string]interface{}{
+                "mass": &massUint,
+            }
+
+            if err := h.repo.MassRequest.UpdateRequestClassItem(
+                result.RequestID,
+                classResult.ClassID,
+                updates,
+            ); err != nil {
+                logrus.Errorf("Failed to update mass for class %d in request %d: %v",
+                    classResult.ClassID, result.RequestID, err)
+            } else {
+                successCount++
+            }
+        }
+
+        newStatus = 4
+        message = fmt.Sprintf("Calculation completed successfully. Updated %d/%d classes",
+            successCount, len(result.Results))
+
+        logrus.Infof("Updated masses for %d classes in request %d", successCount, result.RequestID)
+
+    } else {
+        newStatus = 7
+        if result.Error != "" {
+            message = fmt.Sprintf("Calculation failed: %s", result.Error)
+        } else {
+            message = "Calculation failed: no results returned"
+        }
+        logrus.Errorf("Calculation failed for request %d: %s", result.RequestID, message)
+    }
+
+    updates := map[string]interface{}{
+        "status": newStatus,
+    }
+
+    if err := h.repo.MassRequest.UpdateRequest(result.RequestID, updates); err != nil {
+        logrus.Errorf("Failed to update request status: %v", err)
+        return
+    }
+
+    logrus.Infof("Request %d updated to status %d: %s", result.RequestID, newStatus, message)
 }
